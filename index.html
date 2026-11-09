@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Найди бутылку — ПК</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{background:#1a1a1a;color:#eee;font-family:monospace;overflow:hidden}
+canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;font-size:14px;pointer-events:none;text-shadow:0 0 4px #000;z-index:5}
+#pauseBtn{position:fixed;top:10px;left:50%;transform:translateX(-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,140,0,0.8);color:#111;font-size:18px;font-weight:bold;border:2px solid #f80;z-index:12;cursor:pointer}
+#upgBtn2{position:fixed;top:10px;left:calc(50% + 55px);width:44px;height:44px;border-radius:10px;background:rgba(255,140,0,0.8);color:#111;font-size:18px;font-weight:bold;border:2px solid #f80;z-index:12;cursor:pointer}
+#pauseMenu,#upgMenu{position:fixed;inset:0;background:rgba(0,0,0,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:40}
+#pauseMenu h2,#upgMenu h2{color:#f80;font-size:24px}
+#pauseMenu button,#upgMenu button{padding:14px 34px;background:#f80;color:#111;border:none;border-radius:10px;font-size:16px;font-family:monospace;font-weight:bold;width:260px;cursor:pointer}
+#hint{position:fixed;top:70px;right:14px;background:rgba(0,0,0,0.8);border:2px solid #f80;border-radius:10px;padding:12px 14px;color:#eee;font-size:12px;line-height:1.8;z-index:6;max-width:210px}
+#hint b{color:#f80}
+#ctx{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);display:none;gap:10px;z-index:8}
+#ctx button{padding:12px 22px;background:#f80;color:#111;border:none;border-radius:8px;font-family:monospace;font-weight:bold;font-size:14px;cursor:pointer}
+#shop{position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;padding:70px 16px 20px;overflow-y:auto;z-index:15}
+#shop h2{color:#f80;font-size:20px;margin-bottom:8px}
+.loc-btn{width:100%;max-width:400px;padding:12px;background:#222;border:2px solid #f80;border-radius:8px;color:#eee;font-size:14px;font-family:monospace;cursor:pointer}
+#close{position:fixed;top:14px;right:14px;width:42px;height:42px;border-radius:50%;background:#c33;color:#fff;font-size:20px;border:none;z-index:20;cursor:pointer}
+#msg{position:fixed;bottom:170px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#f80;padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity 0.3s;text-align:center;z-index:50}
+#win{position:fixed;inset:0;background:rgba(0,0,0,0.95);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px;z-index:30}
+#win h1{color:#3fc;font-size:28px;text-align:center}
+#win p{color:#aaa;font-size:14px;text-align:center}
+#win button{padding:14px 30px;background:#f80;color:#111;border:none;border-radius:10px;font-size:16px;font-family:monospace;font-weight:bold;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="hLoc">Футбольный зал</span><span id="hBag">Мешок: 0/10</span><span id="hCoin">💰 0</span></div>
+<button id="pauseBtn">❚❚</button>
+<button id="upgBtn2">⬆</button>
+<div id="hint">
+<b>УПРАВЛЕНИЕ</b><br>
+<b>WASD / ←↑↓→</b> — движение<br>
+<b>E</b> — собирать пыль<br>
+<b>F</b> — сдать / открыть<br>
+<b>Esc</b> — пауза<br>
+<b>Tab</b> — прокачка<br>
+<b>❚❚</b> — пауза (кнопка)<br>
+<b>⬆</b> — прокачка (кнопка)
+</div>
+<div id="pauseMenu">
+<h2>ПАУЗА</h2>
+<button id="resumeBtn">ПРОДОЛЖИТЬ</button>
+<button id="saveBtn">СОХРАНИТЬ</button>
+</div>
+<div id="upgMenu">
+<h2>ПРОКАЧКА</h2>
+<button id="upSpeed"></button>
+<button id="upRadius"></button>
+<button id="upClose">ЗАКРЫТЬ</button>
+</div>
+<div id="ctx"><button id="ctxSell">СДАТЬ (F)</button><button id="ctxUpg">ОБНОВИТЬ</button><button id="ctxOpen">ОТКРЫТЬ (F)</button></div>
+<div id="msg"></div>
+<div id="shop">
+<button id="close">×</button><h2 id="shopTitle">Уборщик</h2>
+<div id="shopBody"></div>
+</div>
+<div id="win">
+<h1>БУТЫЛКА НАЙДЕНА!</h1>
+<p id="winTxt"></p>
+<button onclick="location.reload()">Играть снова</button>
+</div>
+<script>
+const cvs=document.getElementById('c'),ctx=cvs.getContext('2d');
+let W,H;function resize(){W=cvs.width=innerWidth;H=cvs.height=innerHeight;}resize();addEventListener('resize',resize);
+const player={x:0,y:0,r:16,speed:3};
+let dust=[],bottle=null,bag=0,bagMax=10,coins=0;
+const MAXLOC=10;
+let loc=1,unlocked={1:true};
+const LOC_NAMES=["Футбольный зал","Баскетбольный зал","Бадминтон","Волейбол","Теннисный корт","Зал борьбы","Бассейн","Гимнастический зал","Бокс-ринг","Легкоатлетический манеж"];
+const LOC_COST={};
+for(let i=2;i<=MAXLOC;i++)LOC_COST[i]=Math.floor(50*Math.pow(1.6,i-2));
+let bottleLoc=MAXLOC-2+Math.floor(Math.random()*3);
+let keys={};
+let cleaner={x:0,y:0,r:20};
+let guard={x:0,y:0,r:20};
+let collecting=false,collectTimer=0;
+let nearCleaner=false,nearGuard=false;
+let walkPhase=0;
+let paused=false;
+let speedLvl=1,radiusLvl=1;
+
+function rand(a,b){return a+Math.random()*(b-a);}
+function bagColor(){
+if(bagMax>=30)return '#f80';
+if(bagMax>=25)return '#a4f';
+if(bagMax>=20)return '#4af';
+if(bagMax>=15)return '#4f4';
+return '#aaa';
+}
+function applyUpgrades(){player.speed=3+speedLvl*0.5;}
+function genLoc(n){
+dust=[];bag=0;
+const count=70+n*25;
+for(let i=0;i<count;i++)dust.push({x:rand(-W/2+40,W/2-40),y:rand(-H/2+40,H/2-40),r:5,hidden:false});
+bottle=null;
+if(n===bottleLoc)bottle={x:rand(-W/2+80,W/2-80),y:rand(-H/2+80,H/2-80),r:10};
+cleaner={x:-90,y:H/2-80,r:20};
+guard={x:90,y:H/2-80,r:20};
+player.x=0;player.y=0;
+document.getElementById('hLoc').textContent=LOC_NAMES[n-1];
+updHUD();
+}
+function updHUD(){
+const el=document.getElementById('hBag');
+el.textContent='Мешок: '+bag+'/'+bagMax;
+el.style.color=bagColor();
+document.getElementById('hCoin').textContent='💰 '+coins;
+}
+function toast(m){const el=document.getElementById('msg');el.textContent=m;el.style.opacity=1;clearTimeout(el._t);el._t=setTimeout(()=>el.style.opacity=0,1800);}
+function saveGame(){
+localStorage.setItem('bottleSave',JSON.stringify({coins:coins,bagMax:bagMax,unlocked:unlocked,speedLvl:speedLvl,radiusLvl:radiusLvl}));
+}
+function loadGame(){
+const s=localStorage.getItem('bottleSave');
+if(!s)return;
+try{
+const d=JSON.parse(s);
+coins=d.coins||0;
+bagMax=d.bagMax||10;
+if(d.unlocked)unlocked=d.unlocked;
+speedLvl=d.speedLvl||1;
+radiusLvl=d.radiusLvl||1;
+}catch(e){}
+}
+loadGame();
+applyUpgrades();
+genLoc(1);
+
+document.getElementById('pauseBtn').onclick=()=>{paused=true;document.getElementById('pauseMenu').style.display='flex';};
+document.getElementById('resumeBtn').onclick=()=>{paused=false;document.getElementById('pauseMenu').style.display='none';};
+document.getElementById('saveBtn').onclick=()=>{saveGame();toast('Прогресс сохранён!');};
+
+const upgMenu=document.getElementById('upgMenu');
+const upSpeed=document.getElementById('upSpeed');
+const upRadius=document.getElementById('upRadius');
+function speedCost(){return speedLvl*20;}
+function radiusCost(){return radiusLvl*15;}
+function refreshUpg(){
+upSpeed.textContent='Бег ур.'+speedLvl+' → '+(speedLvl+1)+' за '+speedCost()+' 💰';
+upRadius.textContent='Радиус ур.'+radiusLvl+' → '+(radiusLvl+1)+' за '+radiusCost()+' 💰';
+}
+document.getElementById('upgBtn2').onclick=()=>{refreshUpg();upgMenu.style.display='flex';paused=true;};
+document.getElementById('upClose').onclick=()=>{upgMenu.style.display='none';paused=false;};
+upSpeed.onclick=()=>{
+const c=speedCost();
+if(coins>=c){coins-=c;speedLvl++;applyUpgrades();updHUD();toast('Бег ур.'+speedLvl);refreshUpg();}
+else toast('Нужно '+c+' 💰');
+};
+upRadius.onclick=()=>{
+const c=radiusCost();
+if(coins>=c){coins-=c;radiusLvl++;updHUD();toast('Радиус ур.'+radiusLvl);refreshUpg();}
+else toast('Нужно '+c+' 💰');
+};
+
+function tryCollect(){
+if(bag>=bagMax){toast('Мешок полный! Иди к уборщику');collecting=false;return;}
+for(let i=dust.length-1;i>=0;i--){
+const d=dust[i];
+if(d.hidden)continue;if(Math.hypot(d.x-player.x,d.y-player.y)<player.r+22+radiusLvl*4){
+bag++;
+updHUD();
+d.hidden=true;
+setTimeout(()=>{d.hidden=false;},10000);
+return;
+}
+}
+if(bottle&&Math.hypot(bottle.x-player.x,bottle.y-player.y)<player.r+24){
+bottle=null;
+document.getElementById('winTxt').textContent='Ты нашёл бутылку в зале «'+LOC_NAMES[loc-1]+'»!';
+document.getElementById('win').style.display='flex';
+}
+}
+
+const ctxMenu=document.getElementById('ctx');
+const sellBtn=document.getElementById('ctxSell');
+const upgBtn=document.getElementById('ctxUpg');
+const openBtn=document.getElementById('ctxOpen');
+sellBtn.onclick=()=>{
+if(bag===0){toast('Мешок пуст');return;}
+coins+=bag;toast('Сдано '+bag+' пыли за '+bag+' 💰');bag=0;updHUD();
+};
+openBtn.onclick=()=>openShop('guard');
+upgBtn.onclick=()=>openShop('upgrade');
+
+const shop=document.getElementById('shop'),shopBody=document.getElementById('shopBody'),shopTitle=document.getElementById('shopTitle');
+function openShop(type){
+shop.style.display='flex';
+shopBody.innerHTML='';
+if(type==='guard'){
+shopTitle.textContent='Охранник — локации';
+for(let i=1;i<=MAXLOC;i++){
+const b=document.createElement('button');b.className='loc-btn';
+if(unlocked[i]){b.textContent=LOC_NAMES[i-1]+' (открыт)';b.onclick=()=>{loc=i;genLoc(i);shop.style.display='none';};}
+else{b.textContent=LOC_NAMES[i-1]+' — '+LOC_COST[i]+' 💰';b.onclick=()=>tryUnlock(i);}
+b.style.marginTop='6px';
+shopBody.appendChild(b);
+}
+}else{
+shopTitle.textContent='Уборщик — прокачка';
+const cost=bagMax*2;
+const b=document.createElement('button');b.className='loc-btn';
+b.textContent='Прокачать мешок: '+bagMax+' → '+(bagMax+5)+' за '+cost+' 💰';
+b.style.borderColor=bagColor();
+b.style.color=bagColor();
+b.onclick=()=>{
+if(coins>=cost){coins-=cost;bagMax+=5;updHUD();toast('Мешок прокачан до '+bagMax);openShop('upgrade');}
+else toast('Нужно '+cost+' 💰');
+};
+shopBody.appendChild(b);
+}
+}
+document.getElementById('close').onclick=()=>shop.style.display='none';
+function tryUnlock(n){
+if(unlocked[n])return;
+if(coins>=LOC_COST[n]){coins-=LOC_COST[n];unlocked[n]=true;updHUD();toast(LOC_NAMES[n-1]+' открыт!');openShop('guard');}
+else toast('Нужно '+LOC_COST[n]+' 💰');
+}
+
+function drawHuman(px,py,shirt,shorts,hat,item,moving){
+ctx.save();ctx.translate(px,py);
+const sw=moving?Math.sin(walkPhase)*4:0;
+const aw=moving?Math.sin(walkPhase)*3:0;
+ctx.fillStyle='rgba(0,0,0,0.35)';ctx.beginPath();ctx.ellipse(0,14,14,5,0,0,7);ctx.fill();
+ctx.fillStyle=shorts;
+ctx.fillRect(-9+sw*0.3,2,7,12);
+ctx.fillRect(2-sw*0.3,2,7,12);
+ctx.fillStyle='#111';
+ctx.fillRect(-10+sw,12,9,5);
+ctx.fillRect(2-sw,12,9,5);
+ctx.fillStyle=shirt;ctx.fillRect(-10,-10,20,16);
+ctx.fillStyle='#e8b98a';
+ctx.fillRect(-14,-8+aw,4,12);
+ctx.fillRect(10,-8-aw,4,12);
+ctx.fillStyle='#e8b98a';ctx.beginPath();ctx.arc(0,-18,8,0,7);ctx.fill();
+ctx.fillStyle='#3a2418';ctx.beginPath();ctx.arc(0,-20,8,Math.PI,0);ctx.fill();
+if(hat){ctx.fillStyle=hat;ctx.fillRect(-8,-28,16,6);}
+if(item==='mop'){
+ctx.strokeStyle='#8a5a2a';ctx.lineWidth=2;
+ctx.beginPath();ctx.moveTo(14,-6);ctx.lineTo(20,14);ctx.stroke();
+ctx.fillStyle='#ccc';ctx.fillRect(17,12,8,4);
+}
+if(item==='badge'){ctx.fillStyle='#ffd700';ctx.fillRect(-4,-6,8,6);}
+if(item==='bag'){ctx.fillStyle=bagColor();ctx.fillRect(10,-2,10,12);}
+ctx.restore();
+}
+
+function drawLoc(n){
+const bg=['#2a5a2a','#7a4a1a','#2a5a6a','#5a2a5a','#2a6a3a','#4a2a2a','#1a4a6a','#4a4a6a','#5a1a1a','#3a5a1a'][n-1];
+ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ctx.save();ctx.translate(W/2-player.x,H/2-player.y);
+ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=2;
+const S=600;
+ctx.strokeRect(-S/2,-S/2,S,S);
+ctx.beginPath();ctx.moveTo(0,-S/2);ctx.lineTo(0,S/2);ctx.stroke();
+ctx.beginPath();ctx.arc(0,0,80,0,7);ctx.stroke();
+for(let gx=-S/2;gx<S/2;gx+=50){ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.beginPath();ctx.moveTo(gx,-S/2);ctx.lineTo(gx,S/2);ctx.stroke();}
+for(let gy=-S/2;gy<S/2;gy+=50){ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.beginPath();ctx.moveTo(-S/2,gy);ctx.lineTo(S/2,gy);ctx.stroke();}dust.forEach(d=>{if(d.hidden)return;ctx.fillStyle='#c8b888';ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,7);ctx.fill();});
+if(bottle){ctx.fillStyle='#3fc';ctx.beginPath();ctx.arc(bottle.x,bottle.y,bottle.r,0,7);ctx.fill();ctx.fillStyle='#fff';ctx.font='11px monospace';ctx.fillText('?',bottle.x-4,bottle.y+4);}
+drawHuman(cleaner.x,cleaner.y,'#3a7a3a','#2a4a2a','#2a5a2a','mop',false);
+drawHuman(guard.x,guard.y,'#2a2a5a','#111','#111','badge',false);
+drawHuman(player.x,player.y,'#e33','#1e5aa8',null,'bag',Object.keys(keys).some(k=>keys[k]&&['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)));
+ctx.restore();
+}
+
+document.addEventListener('keydown',e=>{
+const k=e.key.toLowerCase();
+keys[k]=true;
+if(k==='escape'){paused=!paused;document.getElementById('pauseMenu').style.display=paused?'flex':'none';}
+if(k==='tab'){e.preventDefault();refreshUpg();upgMenu.style.display='flex';paused=true;}
+if(k==='e'&&!paused){collecting=true;collectTimer=0;tryCollect();}
+if(k==='f'&&!paused){
+if(nearCleaner){if(bag>0){coins+=bag;toast('Сдано '+bag+' пыли за '+bag+' 💰');bag=0;updHUD();}else toast('Мешок пуст');}
+else if(nearGuard){openShop('guard');}
+}
+if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();
+});
+document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+let lastT=0;
+function loop(t){
+const dt=Math.min(50,t-lastT);lastT=t;
+if(!paused){
+let mx=0,my=0;
+if(keys['w']||keys['arrowup'])my-=1;
+if(keys['s']||keys['arrowdown'])my+=1;
+if(keys['a']||keys['arrowleft'])mx-=1;
+if(keys['d']||keys['arrowright'])mx+=1;
+if(mx||my){
+const len=Math.hypot(mx,my);
+player.x+=(mx/len)*player.speed;
+player.y+=(my/len)*player.speed;
+walkPhase+=dt*0.02;
+}
+if(collecting){collectTimer+=dt;if(collectTimer>120){collectTimer=0;tryCollect();}}
+nearCleaner=Math.hypot(cleaner.x-player.x,cleaner.y-player.y)<player.r+45;
+nearGuard=Math.hypot(guard.x-player.x,guard.y-player.y)<player.r+45;
+sellBtn.style.display=nearCleaner?'inline-block':'none';
+upgBtn.style.display=nearCleaner?'inline-block':'none';
+openBtn.style.display=nearGuard?'inline-block':'none';
+ctxMenu.style.display=(nearCleaner||nearGuard)?'flex':'none';
+}
+drawLoc(loc);
+requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
